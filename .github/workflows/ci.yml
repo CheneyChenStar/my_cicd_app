@@ -67,10 +67,39 @@ jobs:
           echo "Distinct levels found: $(jq '[.runs[].results[]?.level] | unique' "$SARIF_FILE")"
           echo "First result sample:"
           jq '.runs[].results[0]' "$SARIF_FILE" 2>/dev/null | head -30
+          echo "First result properties:"
+          jq '.runs[].results[0].properties' "$SARIF_FILE" 2>/dev/null
+          echo "Rule index → severity mapping (sample):"
+          jq '[.runs[].tool.driver.rules[]? | {id, severity: .properties."problem.severity"}] | .[0:5]' "$SARIF_FILE" 2>/dev/null
 
-          HIGH=$(jq '[.runs[].results[]? | select(.level == "error")] | length' "$SARIF_FILE" 2>/dev/null || echo 0)
-          MEDIUM=$(jq '[.runs[].results[]? | select(.level == "warning")] | length' "$SARIF_FILE" 2>/dev/null || echo 0)
-          LOW=$(jq '[.runs[].results[]? | select(.level == "note")] | length' "$SARIF_FILE" 2>/dev/null || echo 0)
+          # Build rule-index → severity map from driver rules
+          HIGH=$(jq '
+            (
+              [.runs[].tool.driver.rules[]? | {
+                key: (.id // .index | tostring),
+                sev: (.properties."problem.severity" // "unknown")
+              }] | from_entries
+            ) as $rule_sev |
+            [.runs[].results[]? | select($rule_sev[.ruleId] == "error")] | length
+          ' "$SARIF_FILE" 2>/dev/null || echo 0)
+          MEDIUM=$(jq '
+            (
+              [.runs[].tool.driver.rules[]? | {
+                key: (.id // .index | tostring),
+                sev: (.properties."problem.severity" // "unknown")
+              }] | from_entries
+            ) as $rule_sev |
+            [.runs[].results[]? | select($rule_sev[.ruleId] == "warning")] | length
+          ' "$SARIF_FILE" 2>/dev/null || echo 0)
+          LOW=$(jq '
+            (
+              [.runs[].tool.driver.rules[]? | {
+                key: (.id // .index | tostring),
+                sev: (.properties."problem.severity" // "unknown")
+              }] | from_entries
+            ) as $rule_sev |
+            [.runs[].results[]? | select($rule_sev[.ruleId] == "recommendation" or $rule_sev[.ruleId] == "note")] | length
+          ' "$SARIF_FILE" 2>/dev/null || echo 0)
 
           echo "::group::CodeQL Severity Summary"
           echo "High/Critical  : $HIGH"
