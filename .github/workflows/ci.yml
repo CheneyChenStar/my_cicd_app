@@ -47,63 +47,25 @@ jobs:
         uses: github/codeql-action/autobuild@v3
 
       - name: Run CodeQL analysis
-        id: analyze
         uses: github/codeql-action/analyze@v3
-        with:
-          upload: false
-          output: sarif-results
 
       - name: Severity gate
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          SARIF_FILE=$(ls sarif-results/*.sarif 2>/dev/null | head -1)
+          REF="refs/heads/${{ github.ref_name }}"
+          echo "Querying Code Scanning API for open alerts on $REF ..."
 
-          if [ -z "$SARIF_FILE" ]; then
-            echo "No SARIF file found — nothing to check."
-            exit 0
-          fi
-
-          echo "SARIF file: $SARIF_FILE"
-          echo "Total results: $(jq '[.runs[].results[]?] | length' "$SARIF_FILE")"
-          echo "Distinct levels found: $(jq '[.runs[].results[]?.level] | unique' "$SARIF_FILE")"
-          echo "First result sample:"
-          jq '.runs[].results[0]' "$SARIF_FILE" 2>/dev/null | head -30
-          echo "First result properties:"
-          jq '.runs[].results[0].properties' "$SARIF_FILE" 2>/dev/null
-          echo "Rule index → severity mapping (sample):"
-          jq '[.runs[].tool.driver.rules[]? | {id, severity: .properties."problem.severity"}] | .[0:5]' "$SARIF_FILE" 2>/dev/null
-
-          # Build rule-index → severity map from driver rules
-          HIGH=$(jq '
-            (
-              [.runs[].tool.driver.rules[]? | {
-                key: (.id // .index | tostring),
-                sev: (.properties."problem.severity" // "unknown")
-              }] | from_entries
-            ) as $rule_sev |
-            [.runs[].results[]? | select($rule_sev[.ruleId] == "error")] | length
-          ' "$SARIF_FILE" 2>/dev/null || echo 0)
-          MEDIUM=$(jq '
-            (
-              [.runs[].tool.driver.rules[]? | {
-                key: (.id // .index | tostring),
-                sev: (.properties."problem.severity" // "unknown")
-              }] | from_entries
-            ) as $rule_sev |
-            [.runs[].results[]? | select($rule_sev[.ruleId] == "warning")] | length
-          ' "$SARIF_FILE" 2>/dev/null || echo 0)
-          LOW=$(jq '
-            (
-              [.runs[].tool.driver.rules[]? | {
-                key: (.id // .index | tostring),
-                sev: (.properties."problem.severity" // "unknown")
-              }] | from_entries
-            ) as $rule_sev |
-            [.runs[].results[]? | select($rule_sev[.ruleId] == "recommendation" or $rule_sev[.ruleId] == "note")] | length
-          ' "$SARIF_FILE" 2>/dev/null || echo 0)
+          HIGH=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$REF&state=open&severity=critical,high" \
+            --jq 'length' 2>/dev/null || echo 0)
+          MEDIUM=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$REF&state=open&severity=medium" \
+            --jq 'length' 2>/dev/null || echo 0)
+          LOW=$(gh api "repos/$GITHUB_REPOSITORY/code-scanning/alerts?ref=$REF&state=open&severity=low,note" \
+            --jq 'length' 2>/dev/null || echo 0)
 
           echo "::group::CodeQL Severity Summary"
           echo "High/Critical  : $HIGH"
-          echo "Medium/Warning : $MEDIUM"
+          echo "Medium         : $MEDIUM"
           echo "Low/Note       : $LOW"
           echo "::endgroup::"
 
@@ -121,9 +83,3 @@ jobs:
           fi
 
           echo "No high severity issues. CodeQL gate passed."
-
-      - name: Upload SARIF to GitHub
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: sarif-results
