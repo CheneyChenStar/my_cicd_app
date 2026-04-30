@@ -17,6 +17,10 @@ app.get('/calc', (req, res) => {
   res.json({ expression, result });
 });
 
+app.get('/greet', (req, res) => {
+  res.send(`<h1>Hello ${req.query.name}</h1>`);
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

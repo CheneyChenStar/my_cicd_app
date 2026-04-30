@@ -41,6 +41,7 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: javascript
+          queries: security-and-quality
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
