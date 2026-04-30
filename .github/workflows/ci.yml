@@ -27,3 +27,67 @@ jobs:
 
       - name: Run lint
         run: npm run lint
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Run CodeQL analysis
+        id: analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          upload: false
+          output: sarif-results
+
+      - name: Severity gate
+        run: |
+          SARIF_FILE=$(ls sarif-results/*.sarif 2>/dev/null | head -1)
+
+          if [ -z "$SARIF_FILE" ]; then
+            echo "No SARIF file found — nothing to check."
+            exit 0
+          fi
+
+          HIGH=$(jq '[.runs[].results[]? | select(.level == "error")] | length' "$SARIF_FILE" 2>/dev/null || echo 0)
+          MEDIUM=$(jq '[.runs[].results[]? | select(.level == "warning")] | length' "$SARIF_FILE" 2>/dev/null || echo 0)
+          LOW=$(jq '[.runs[].results[]? | select(.level == "note")] | length' "$SARIF_FILE" 2>/dev/null || echo 0)
+
+          echo "::group::CodeQL Severity Summary"
+          echo "High/Critical  : $HIGH"
+          echo "Medium/Warning : $MEDIUM"
+          echo "Low/Note       : $LOW"
+          echo "::endgroup::"
+
+          if [ "$LOW" -gt 0 ]; then
+            echo "::warning::Found ${LOW} low severity issue(s). Review recommended, CI passes."
+          fi
+
+          if [ "$MEDIUM" -gt 0 ]; then
+            echo "::warning::Found ${MEDIUM} medium severity issue(s). Review recommended."
+          fi
+
+          if [ "$HIGH" -gt 0 ]; then
+            echo "::error::Found ${HIGH} high/critical severity issue(s). CI BLOCKED. Fix before merging."
+            exit 1
+          fi
+
+          echo "No high severity issues. CodeQL gate passed."
+
+      - name: Upload SARIF to GitHub
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif-results
